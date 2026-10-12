@@ -1,32 +1,49 @@
 import { useState, useEffect } from 'react';
+import { Navbar } from './components/portfolio/Navbar';
+import { Hero } from './components/portfolio/Hero';
+import { About } from './components/portfolio/About';
+import { FeaturedProject } from './components/portfolio/FeaturedProject';
+import { Skills } from './components/portfolio/Skills';
+import { Contact } from './components/portfolio/Contact';
+import { Footer } from './components/portfolio/Footer';
+import { ResumeModal } from './components/portfolio/ResumeModal';
+import { InteractiveDemoModal } from './components/portfolio/InteractiveDemoModal';
+
+// Optional Full App components if user enters standalone quiz mode
 import { Dashboard } from './components/Dashboard';
 import { Quiz } from './components/Quiz';
 import { Results } from './components/Results';
 import { Login } from './components/Login';
 import { questions } from './data';
 import type { Topic, QuizResult } from './types';
-import { Code2 } from 'lucide-react';
+import { Code2, ArrowLeft } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import type { User } from '@supabase/supabase-js';
-import { useTheme } from './hooks/useTheme';
 
-type View = 'dashboard' | 'quiz' | 'results';
+type AppMode = 'portfolio' | 'full-codequest';
+type QuizView = 'dashboard' | 'quiz' | 'results';
 
 function App() {
+  const [appMode, setAppMode] = useState<AppMode>('portfolio');
+  const [isResumeOpen, setIsResumeOpen] = useState(false);
+  const [isDemoOpen, setIsDemoOpen] = useState(false);
+
+  // State for optional full Code Quest exploration
   const [session, setSession] = useState<{ user: User } | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-  
-  const [view, setView] = useState<View>('dashboard');
+  const [quizView, setQuizView] = useState<QuizView>('dashboard');
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
   const [history, setHistory] = useState<QuizResult[]>([]);
 
-  useTheme(); // Initialize theme
+  // Ensure dark mode class is applied to html
+  useEffect(() => {
+    document.documentElement.classList.add('dark');
+  }, []);
 
+  // Supabase session listener for full-app mode
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      setLoadingAuth(false);
     });
 
     const {
@@ -38,73 +55,18 @@ function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch history when user changes
-  useEffect(() => {
-    if (session?.user) {
-      fetchHistory();
-      migrateLocalHistory();
-    } else {
-      setHistory([]);
-    }
-  }, [session?.user]);
-
-  const migrateLocalHistory = async () => {
-    if (!session?.user) return;
-    const local = localStorage.getItem('codequest_history');
-    if (local) {
-      try {
-        const parsed = JSON.parse(local);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Transform to new schema
-          const toInsert = parsed.map((p: any) => ({
-            user_id: session.user.id,
-            category: p.topic || p.category,
-            score: p.score,
-            total_questions: p.totalQuestions || p.total_questions,
-            accuracy: Math.round((p.score / (p.totalQuestions || p.total_questions)) * 100),
-            completed_at: p.date || p.completed_at
-          }));
-          
-          await supabase.from('quiz_results').insert(toInsert);
-          // Remove from local storage after successful migration to prevent exposing to another user
-          localStorage.removeItem('codequest_history');
-          fetchHistory();
-        }
-      } catch (e) {
-        console.error('Migration failed', e);
-      }
-    }
-  };
-
-  const fetchHistory = async () => {
-    if (!session?.user) return;
-    const { data, error } = await supabase
-      .from('quiz_results')
-      .select('*')
-      .order('completed_at', { ascending: true }); // We reverse it in Dashboard
-
-    if (!error && data) {
-      setHistory(data as QuizResult[]);
-    }
-  };
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    setView('dashboard');
-  };
-
   const handleSelectTopic = (topic: Topic) => {
     setSelectedTopic(topic);
-    setView('quiz');
+    setQuizView('quiz');
     setUserAnswers({});
   };
 
   const handleQuizComplete = async (answers: Record<number, number>) => {
     setUserAnswers(answers);
-    setView('results');
-    
+    setQuizView('results');
+
     if (selectedTopic && session?.user) {
-      const topicQuestions = questions.filter(q => q.topic === selectedTopic);
+      const topicQuestions = questions.filter((q) => q.topic === selectedTopic);
       const score = topicQuestions.reduce((acc, q, index) => {
         return acc + (answers[index] === q.correctAnswer ? 1 : 0);
       }, 0);
@@ -116,7 +78,7 @@ function App() {
         score,
         total_questions: topicQuestions.length,
         accuracy,
-        completed_at: new Date().toISOString()
+        completed_at: new Date().toISOString(),
       };
 
       const { data, error } = await supabase
@@ -124,70 +86,135 @@ function App() {
         .insert([result])
         .select()
         .single();
-        
+
       if (!error && data) {
-        setHistory(prev => [...prev, data as QuizResult]);
+        setHistory((prev) => [...prev, data as QuizResult]);
       }
     }
   };
 
-  if (loadingAuth) {
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setQuizView('dashboard');
+  };
+
+  // If in standalone full Code Quest app mode
+  if (appMode === 'full-codequest') {
+    const currentQuestions = selectedTopic
+      ? questions.filter((q) => q.topic === selectedTopic)
+      : [];
+
     return (
-      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen bg-[#07090e] text-slate-100 font-sans">
+        {/* Top bar to easily switch back to Portfolio */}
+        <header className="bg-slate-900/90 border-b border-slate-800 sticky top-0 z-30 backdrop-blur-md">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <button
+              onClick={() => setAppMode('portfolio')}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4 text-emerald-400" />
+              <span>← Return to Rahul Sharma Portfolio</span>
+            </button>
+
+            <div
+              className="flex items-center gap-2 cursor-pointer group"
+              onClick={() => setQuizView('dashboard')}
+            >
+              <div className="p-1.5 bg-emerald-600 rounded-lg">
+                <Code2 className="w-4 h-4 text-white" />
+              </div>
+              <span className="text-sm font-bold tracking-tight text-white">CodeQuest Standalone Engine</span>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          {!session ? (
+            <div className="max-w-md mx-auto">
+              <div className="mb-4 text-center">
+                <p className="text-xs text-slate-400 mb-2">
+                  Code Quest includes user accounts and cloud history persistence via Supabase.
+                </p>
+              </div>
+              <Login />
+            </div>
+          ) : (
+            <>
+              {quizView === 'dashboard' && (
+                <Dashboard
+                  onSelectTopic={handleSelectTopic}
+                  history={history}
+                  onSignOut={handleSignOut}
+                />
+              )}
+
+              {quizView === 'quiz' && currentQuestions.length > 0 && (
+                <Quiz
+                  questions={currentQuestions}
+                  onComplete={handleQuizComplete}
+                  onCancel={() => setQuizView('dashboard')}
+                />
+              )}
+
+              {quizView === 'results' && currentQuestions.length > 0 && (
+                <Results
+                  questions={currentQuestions}
+                  userAnswers={userAnswers}
+                  onRetry={() => {
+                    setUserAnswers({});
+                    setQuizView('quiz');
+                  }}
+                  onHome={() => setQuizView('dashboard')}
+                />
+              )}
+            </>
+          )}
+        </main>
       </div>
     );
   }
 
-  if (!session) {
-    return <Login />;
-  }
-
-  const currentQuestions = selectedTopic 
-    ? questions.filter(q => q.topic === selectedTopic) 
-    : [];
-
+  // Primary Default View: Dark Premium Personal Portfolio
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50 font-sans transition-colors duration-200">
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-10 shadow-sm transition-colors duration-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div 
-            className="flex items-center gap-2 cursor-pointer group"
-            onClick={() => setView('dashboard')}
-          >
-            <div className="p-2 bg-blue-600 rounded-lg group-hover:bg-blue-700 transition-colors">
-              <Code2 className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">CodeQuest</span>
-          </div>
-        </div>
-      </header>
+    <div className="min-h-screen bg-[#07090e] text-slate-100 flex flex-col selection:bg-emerald-500/30 selection:text-emerald-300">
+      {/* Navigation */}
+      <Navbar
+        onOpenResume={() => setIsResumeOpen(true)}
+        onOpenContact={() => {
+          const el = document.getElementById('contact');
+          el?.scrollIntoView({ behavior: 'smooth' });
+        }}
+      />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {view === 'dashboard' && (
-          <Dashboard onSelectTopic={handleSelectTopic} history={history} onSignOut={handleSignOut} />
-        )}
-        
-        {view === 'quiz' && currentQuestions.length > 0 && (
-          <Quiz 
-            questions={currentQuestions} 
-            onComplete={handleQuizComplete}
-            onCancel={() => setView('dashboard')}
-          />
-        )}
-        
-        {view === 'results' && currentQuestions.length > 0 && (
-          <Results 
-            questions={currentQuestions}
-            userAnswers={userAnswers}
-            onRetry={() => {
-              setUserAnswers({});
-              setView('quiz');
-            }}
-            onHome={() => setView('dashboard')}
-          />
-        )}
+      {/* Main Content */}
+      <main className="flex-1">
+        <Hero
+          onOpenResume={() => setIsResumeOpen(true)}
+          onOpenInteractiveDemo={() => setIsDemoOpen(true)}
+        />
+        <About />
+        <FeaturedProject
+          onOpenInteractiveDemo={() => setIsDemoOpen(true)}
+        />
+        <Skills />
+        <Contact />
       </main>
+
+      {/* Footer */}
+      <Footer />
+
+      {/* Resume Modal */}
+      <ResumeModal
+        isOpen={isResumeOpen}
+        onClose={() => setIsResumeOpen(false)}
+      />
+
+      {/* Interactive In-Portfolio Demo Modal */}
+      <InteractiveDemoModal
+        isOpen={isDemoOpen}
+        onClose={() => setIsDemoOpen(false)}
+      />
     </div>
   );
 }
